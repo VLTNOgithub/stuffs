@@ -3,11 +3,11 @@ from random import choice
 
 sense = SenseHat()
 
-red = (255,0,0)
-green = (0,255,0)
-blue =(0,0,255)
+red = [255, 0, 0]
+green = [0, 255, 0]
+blue = [0, 0, 255]
 
-colours = [red,green,blue]
+colours = [red, green, blue]
 
 while True:
     grid = []
@@ -20,8 +20,3 @@ while True:
                     grid.append(colour)
 
                 sense.set_pixels(grid)
-
-
-
-
-
