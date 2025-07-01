@@ -9,4 +9,8 @@ while True:
         os.system("echo 0 | sudo tee /sys/class/leds/ACT/brightness")
 
 
+
+
+
+
    
