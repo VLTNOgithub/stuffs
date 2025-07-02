@@ -78,6 +78,7 @@ def setup_cam():
 
 # ===== OBJECT DETECTION =====
 def detect_objects(frame):
+    start = time.time()
     if net is None:
         return frame, []
     
@@ -139,6 +140,7 @@ def detect_objects(frame):
             cv2.putText(frame, label, (x, y-5), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     
+    print(f"Detection time: {time.time() - start:.2f}s")
     return frame, class_names
 
 # ===== MAIN LOOP =====
