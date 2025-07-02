@@ -4,12 +4,12 @@ import os
 from picamera2 import Picamera2
 
 # find user
-users  = []
+users = []
 users.append(os.getlogin())
 
 #This is to pull the information about what each object is called
 classNames = []
-classFile = "/home/" + users[0] + "/Desktop/Object_Detection_Files/coco.names"
+classFile = "/home/" + users[0] + "/stuffs/coco.names"
 with open(classFile,"rt") as f:
     classNames = f.read().rstrip("\n").split("\n")
 
