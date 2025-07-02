@@ -6,3 +6,6 @@ def parse_matrix(matrix):
 
         parsed_matrix.append(rgb)
     return parsed_matrix
+
+def show_message(sense, input):
+    sense.show_message(input, 0.05)
