@@ -8,7 +8,10 @@ import cv2
 import time
 import numpy as np
 import requests
+import threading
 from picamera2 import Picamera2
+from sense_hat import SenseHat
+import yapper as ypr
 
 # ===== CONFIGURATION =====
 MODEL_URL = "https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/yolov4-tiny.weights"
@@ -74,6 +77,13 @@ if config_ok and model_ok and classes_ok:
 else:
     print("Skipping model initialization")
 
+# Initialise Sense HAT
+sense = SenseHat()
+sense.clear()
+
+# Initialise Yapper
+yapper = ypr.Yapper()
+
 # Precompute deadzone lines
 deadzone_lines = np.zeros((RESOLUTION[1], RESOLUTION[0], 3), dtype=np.uint8)
 cv2.line(deadzone_lines, (MIDDLE_X - DEADZONE, 0), 
@@ -92,7 +102,7 @@ def setup_cam():
     time.sleep(2)  # Warm-up
     return picam2
 
-# ===== OPTIMIZED OBJECT DETECTION =====
+# ===== OBJECT DETECTION =====
 def detect_objects(frame_bgr):
     if net is None:
         return frame_bgr, []
@@ -141,7 +151,7 @@ def detect_objects(frame_bgr):
     indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
     
     # Process detected objects
-    detected_objects = []
+    detected_objects = {}
     if len(indices) > 0:
         for i in indices.flatten():
             x, y, w, h = boxes[i]
@@ -171,48 +181,110 @@ def detect_objects(frame_bgr):
             
             # Draw circle at center
             cv2.circle(frame_bgr, (center_x, center_y), 2, (0, 0, 255), -1)
-            detected_objects.append(class_name)
+            detected_objects.__setitem__(class_name, state)
     
     return frame_bgr, detected_objects
 
-# ===== REAL-TIME OPTIMIZED MAIN LOOP =====
+# ===== ASYNC DETECTION CLASS =====
+class AsyncDetector:
+    def __init__(self):
+        self.active = False
+        self.result_frame = None
+        self.result_objects = {}
+        self.thread = None
+        self.lock = threading.Lock()
+        
+    def start_detection(self, frame_bgr):
+        with self.lock:
+            if self.active:
+                return False
+                
+            self.active = True
+            self.thread = threading.Thread(target=self._detect_thread, args=(frame_bgr.copy(),))
+            self.thread.daemon = True
+            self.thread.start()
+            return True
+            
+    def _detect_thread(self, frame_bgr):
+        processed_frame, objects = detect_objects(frame_bgr)
+        with self.lock:
+            self.result_frame = processed_frame
+            self.result_objects = objects
+            self.active = False
+            
+    def get_results(self):
+        with self.lock:
+            if self.result_frame is None:
+                return None, []
+            return self.result_frame, self.result_objects
+            
+    def is_active(self):
+        with self.lock:
+            return self.active
+
+# ===== MAIN LOOP WITH ASYNC DETECTION =====
 def object_detection(cam):
     try:
         cv2.namedWindow('Object Detection', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Object Detection', *RESOLUTION)
         
-        # For accurate FPS measurement
-        frame_count = 0
-        start_time = time.time()
-        last_fps_time = start_time
+        # Initialize async detector
+        detector = AsyncDetector()
+        last_detection_time = 0
+        debounce_time = 1.0  # Minimum time between detections
+        
+        # Store the last processed frame
+        last_processed_frame = None
         
         while True:
             # Capture frame
             frame = cam.capture_array("main")
+            frame_rgb = frame.copy()  # Preserve RGB version
             
-            # Convert to BGR for processing
+            # Convert to BGR for potential detection
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            # Process detection
-            processed_frame, objects = detect_objects(frame_bgr)
+            # Check for joystick press
+            for event in sense.stick.get_events():
+                if event.action == 'pressed' and not detector.is_active():
+                    current_time = time.time()
+                    if current_time - last_detection_time > debounce_time:
+                        last_detection_time = current_time
+                        detector.start_detection(frame_bgr)
+                        sense.clear(0, 255, 0)  # Green light when detecting
+                        time.sleep(0.1)
+                        sense.clear(0, 0, 0)
             
-            # Add deadzone lines and convert to RGB for display
-            display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+            # Check if detection is complete
+            if not detector.is_active():
+                processed_frame, objects = detector.get_results()
+                if processed_frame is not None:
+                    last_processed_frame = processed_frame
+                    
+                    if objects:
+                        print(f"Detected: {', '.join(dict(objects))}")
+                        for obj in objects.items():
+                            obj_name = obj[0]
+                            obj_state = obj[1]
+                            print(obj_name, obj_state)
+                            if (obj_state == "CLOSE"):
+                                yapper.yap(f"There is a {obj_name} close.")
+                                break
+
+                            yapper.yap(f"There is a {obj_name} to the {obj_state}")
+            
+            # Prepare display frame
+            if last_processed_frame is not None:
+                display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
+            else:
+                display_frame = frame_rgb.copy()
+            
+            # Add deadzone lines
             cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
             
-            # Calculate real FPS
-            frame_count += 1
-            current_time = time.time()
-            elapsed = current_time - start_time
-            
-            # Update FPS display every second
-            if current_time - last_fps_time >= 1.0:
-                actual_fps = frame_count / (current_time - last_fps_time)
-                frame_count = 0
-                last_fps_time = current_time
-            
-            # Show FPS on frame
-            cv2.putText(display_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
+            # Show detection status
+            status = "DETECTING" if detector.is_active() else "READY"
+            cv2.putText(display_frame, f"Status: {status}", (10, 60), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             # Show frame
@@ -224,9 +296,11 @@ def object_detection(cam):
     finally:
         cam.stop()
         cv2.destroyAllWindows()
+        sense.clear()
 
 if __name__ == "__main__":
     print("Starting object detection...")
+    print("Press Sense HAT joystick to detect objects")
     print("Press 'q' to exit")
     camera = setup_cam()
     object_detection(camera)
