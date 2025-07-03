@@ -151,7 +151,7 @@ def detect_objects(frame_bgr):
     indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
     
     # Process detected objects
-    detected_objects = {}
+    detected_objects = []
     if len(indices) > 0:
         for i in indices.flatten():
             x, y, w, h = boxes[i]
@@ -181,7 +181,8 @@ def detect_objects(frame_bgr):
             
             # Draw circle at center
             cv2.circle(frame_bgr, (center_x, center_y), 2, (0, 0, 255), -1)
-            detected_objects.__setitem__(class_name, state)
+
+            detected_objects.append({"name": class_name, "state": state})
     
     return frame_bgr, detected_objects
 
@@ -261,17 +262,49 @@ def object_detection(cam):
                 if processed_frame is not None:
                     last_processed_frame = processed_frame
                     
-                    if objects:
-                        print(f"Detected: {', '.join(dict(objects))}")
-                        for obj in objects.items():
-                            obj_name = obj[0]
-                            obj_state = obj[1]
-                            print(obj_name, obj_state)
-                            if (obj_state == "CLOSE"):
-                                yapper.yap(f"There is a {obj_name} close.")
-                                break
+            if objects:
+                # Group by name
+                from collections import defaultdict, Counter
+                grouped_objects = defaultdict(list)
+                for obj in objects:
+                    grouped_objects[obj["name"]].append(obj["state"])
 
-                            yapper.yap(f"There is a {obj_name} to the {obj_state}")
+                # Priority: CLOSE > MIDDLE > LEFT/RIGHT
+                close_obj = None
+                for obj_name, states in grouped_objects.items():
+                    if "CLOSE" in states:
+                        close_obj = obj_name
+                        break
+
+                if close_obj:
+                    yapper.yap(f"There is a {close_obj} in front of you.")
+                else:
+                    # Count all objects by state
+                    state_counts = defaultdict(lambda: defaultdict(int))
+                    for obj_name, states in grouped_objects.items():
+                        for state in states:
+                            state_counts[state][obj_name] += 1
+
+                    # Build phrases for LEFT and RIGHT
+                    phrases = []
+                    for state in ["LEFT", "RIGHT"]:
+                        objs = state_counts[state]
+                        if objs:
+                            obj_phrases = []
+                            for obj_name, count in objs.items():
+                                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
+                            direction = "to your left" if state == "LEFT" else "to your right"
+                            phrases.append(f"{' and '.join(obj_phrases)} {direction}")
+                    if phrases:
+                        yapper.yap("There " + ("is" if len(phrases) == 1 else "are") + " " + " and ".join(phrases) + ".")
+                    else:
+                        # If only MIDDLE objects, list them
+                        middle_objs = state_counts["MIDDLE"]
+                        if middle_objs:
+                            obj_phrases = []
+                            for obj_name, count in middle_objs.items():
+                                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
+                            yapper.yap("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
             
             # Prepare display frame
             if last_processed_frame is not None:

@@ -1,0 +1,34 @@
+### Explanation of the Updated Detection & TTS Code
+
+- **detect_objects**:  
+  Returns a list of detected objects, each as a dictionary with `"name"` (e.g. "car") and `"state"` (e.g. "LEFT", "RIGHT", "MIDDLE", "CLOSE").
+  Example: `{{"name": "car", "state": "LEFT"}, {"name": "dog", "state": "RIGHT"}}`
+
+- **Grouping by Name**:  
+  Uses `defaultdict(list)` to group all detected objects by their name, collecting all their states.  
+  Example: `{"car": ["LEFT", "LEFT", "RIGHT"], "dog": ["RIGHT"]}`
+
+- **Priority Handling**:  
+  Checks if any object is `"CLOSE"`. If so, immediately announces:  
+  `"There is a car in front of you."`
+
+- **Counting by State**:  
+  Uses a nested `defaultdict` to count how many of each object are in each direction.  
+  Example: `{"LEFT": {"car": 2}, "RIGHT": {"dog": 1}}`
+
+- **Building Phrases**:  
+  For each direction ("LEFT", "RIGHT"), builds phrases like `"2 cars to your left"`.  
+  Uses `.join()` to combine multiple objects with "and".
+
+- **Final TTS Output**:  
+  - If objects are to the left/right:  
+    `"There are 2 cars to your left and 1 dog to your right."`
+  - If only in the middle:  
+    `"There is a car in front of you."` or  
+    `"There are 2 cars and 1 dog in front of you."`
+
+- **`.join()`**:  
+  Combines a list of strings into one, separated by a chosen string (e.g. `" and ".join(["a", "b"])` → `"a and b"`).
+
+- **`defaultdict`**:  
+  A dictionary that creates a default value (like an empty list or 0) for new keys automatically, making grouping and counting easier.
