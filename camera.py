@@ -82,7 +82,7 @@ sense = SenseHat()
 sense.clear()
 
 # Initialise Yapper
-yapper = ypr.Yapper()
+yapper = ypr.Yapper(use_stdout=True)
 
 # Precompute deadzone lines
 deadzone_lines = np.zeros((RESOLUTION[1], RESOLUTION[0], 3), dtype=np.uint8)
