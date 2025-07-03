@@ -1,13 +1,9 @@
 import os
-os.environ["QT_QPA_PLATFORM"] = "eglfs"
-os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = "/usr/lib/aarch64-linux-gnu/qt5/plugins"
-os.environ["DISPLAY"] = ":0"
-os.environ["XDG_RUNTIME_DIR"] = "/run/user/1000"
 
 import cv2
-import time
 import numpy as np
 import requests
+from yapper import Yapper
 from picamera2 import Picamera2
 
 # ===== CONFIGURATION =====
@@ -22,6 +18,7 @@ CLASSES_PATH = "coco.names"
 # Detection parameters (adjust these as needed)
 CONFIDENCE_THRESHOLD = 0.4  # Higher = fewer but more accurate detections
 RESOLUTION = (480, 360)  # Lower for better performance
+DEADZONE = 2
 
 # ===== INITIALIZATION =====
 def download_file(url, path):
@@ -71,12 +68,11 @@ def setup_cam():
     )
     picam2.configure(config)
     picam2.start()
-    time.sleep(1)  # Wait for camera to warm up
+    # time.sleep(1)  # Wait for camera to warm up
     return picam2
 
 # ===== OBJECT DETECTION =====
 def detect_objects(frame):
-    start = time.time()
     if net is None:
         return []
     
@@ -102,6 +98,7 @@ def detect_objects(frame):
     confidences = []
     class_ids = []
     class_names = []
+    h, w = frame.shape[:2]
     
     for output in detections:
         for detection in output:
@@ -110,11 +107,22 @@ def detect_objects(frame):
             confidence = scores[class_id]
             
             if confidence > CONFIDENCE_THRESHOLD:
+                box = detection[0:4] * np.array([w, h, w, h])
+                (centerX, centerY, width, height) = box.astype("int")
+                x = int(centerX - (width / 2))
+                y = int(centerY - (height / 2))
+
+                middle = RESOLUTION[0] // 2
+
+                print(f"Object {classes[class_id]} found at {x} {y}")
+
+                if x >= (middle - DEADZONE) or x <= (middle - DEADZONE):
+                    print(f"{classes[class_id]} IS IN THE MIDDLE!")
+
                 confidences.append(float(confidence))
                 class_ids.append(class_id)
                 class_names.append(classes[class_id])
-    
-    print(f"Detection time: {time.time() - start:.2f}s")
+                
     return class_names
 
 # ===== MAIN LOOP =====
@@ -125,12 +133,8 @@ def object_detection(cam):
             objects = detect_objects(frame)
             
             # Display detected objects in console
-            if objects:
-                print(f"Detected: {', '.join(set(objects))}")
-            
-            # Exit on 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            # if objects:
+            #     print(f"Detected: {', '.join(set(objects))}")
     finally:
         cam.stop()
         cv2.destroyAllWindows()

@@ -49,14 +49,41 @@ def show_message(input):
 # for our_names_lol in names:
 #     print(our_names_lol)
 
-number = int(input("enter a number: "))
+# number = int(input("enter a number: "))
 
-Pos_or_neg = ""
-if number > 0:
-    Pos_or_neg = "POSITIVE"
-elif number < 0:
-    Pos_or_neg = "NEGATIVE"
-else:
-    Pos_or_neg = "ZERO"
+# Pos_or_neg = ""
+# if number > 0:
+#     Pos_or_neg = "POSITIVE"
+# elif number < 0:
+#     Pos_or_neg = "NEGATIVE"
+# else:
+#     Pos_or_neg = "ZERO"
 
-show_message(f"{number} is {Pos_or_neg}")
+# show_message(f"{number} is {Pos_or_neg}")
+
+# import time
+# from sense_hat import SenseHat
+# sense = SenseHat()
+# sense.clear()
+
+# def display_counter(count):
+#     print(count)
+#     sense.show_message(f"Count: {count}", scroll_speed=0.025)
+
+# def update_counter(count, direction):
+#     if direction == "up":
+#         count += 1
+#     elif direction == "down":
+#         count -= 1
+#     return count
+
+# def check_press_and_update():
+#     count = 0
+#     while True:
+#         for event in sense.stick.get_events():
+#             if event.action == "pressed":
+#                 count = update_counter(count, event.direction)
+#                 display_counter(count)
+#         time.sleep(0.1)
+
+# check_press_and_update()
