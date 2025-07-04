@@ -27,7 +27,7 @@ DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
 RESOLUTION = (480, 360)
-DEADZONE = 6
+DEADZONE = 8
 MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 320  # Reduced network input size
 
@@ -80,9 +80,6 @@ else:
 # Initialise Sense HAT
 sense = SenseHat()
 sense.clear()
-
-# Initialise Yapper
-yapper = ypr.Yapper(use_stdout=True)
 
 # Precompute deadzone lines
 deadzone_lines = np.zeros((RESOLUTION[1], RESOLUTION[0], 3), dtype=np.uint8)
@@ -223,7 +220,30 @@ class AsyncDetector:
         with self.lock:
             return self.active
 
+class AsyncTTS:
+    def __init__(self):
+        self.active = False
+        self.thread = None
+        self.lock = threading.Lock()
+        self.yapper = ypr.Yapper(use_stdout=True)
+        
+    def start_tts(self, text):
+        with self.lock:
+            self.active = True
+            self.thread = threading.Thread(target=self._async_tts, args=(text,))
+            self.thread.daemon = True
+            self.thread.start()
+            return True
+    
+    def _async_tts(self, text):
+        with self.lock:
+            self.yapper.yap(text)
+
+
 def process_tts(objects):
+    # Initialise async tts
+    async_tts = AsyncTTS()
+
     # Group by name
     from collections import defaultdict
     grouped_objects = defaultdict(list)
@@ -238,7 +258,7 @@ def process_tts(objects):
             break
 
     if close_obj:
-        yapper.yap(f"There is a {close_obj} in front of you.")
+        async_tts.start_tts(f"There is a {close_obj} in front of you.")
         return
     
     # Count all objects by state
@@ -249,18 +269,29 @@ def process_tts(objects):
     
     # Build phrases for LEFT and RIGHT
     phrases = []
-    for state in ["LEFT", "RIGHT"]: # ["LEFT", "RIGHT"] => "LEFT" then "RIGHT"
+    for state in ["LEFT", "RIGHT", "MIDDLE"]: # ["LEFT", "RIGHT", "MIDDLE"] => "LEFT" then "RIGHT" then "MIDDLE"
         # Gets all objects bases on state (left or right)
         objs = state_counts[state] # {'person': 2, 'clock': 1, 'tvmonitor': 1}
         if objs:
             obj_phrases = []
             for obj_name, count in objs.items():
-                obj_name = "people" if count > 1 and obj_name == "person" else "person"
+                if obj_name == "person":
+                    obj_name = "people" if count > 1 else "person"
                 obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # '2 people', '1 car'
-            direction = "to your left" if state == "LEFT" else "to your right"
+            if state == "LEFT":
+                direction = "to your left"
+            elif state == "RIGHT":
+                direction = "to your right"
+
+
+
+
+
+            else: # Not left or right so has to be middle
+                direction = "in front of you"
             phrases.append(f"{' and '.join(obj_phrases)} {direction}") # ' and '.join(obj_phrases) => '2 people and 1 car' => '2 people and 1 car to your left'
     if phrases:
-        yapper.yap("There " + ("is" if len(phrases) == 1 else "are") + " " + " and ".join(phrases) + ".")
+        async_tts.start_tts("There " + ("is" if len(phrases) == 1 or phrases[0].__contains__("person") else "are") + " " + " and ".join(phrases) + ".")
     else:
         # If only MIDDLE objects, list them
         middle_objs = state_counts["MIDDLE"]
@@ -268,40 +299,63 @@ def process_tts(objects):
             obj_phrases = []
             for obj_name, count in middle_objs.items():
                 obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
-            yapper.yap("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
+            async_tts.start_tts("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
 
 # ===== MAIN LOOP WITH ASYNC DETECTION =====
 def object_detection(cam):
     try:
         cv2.namedWindow('Object Detection', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Object Detection', *RESOLUTION)
-        
+
         # Initialize async detector
         detector = AsyncDetector()
-        last_detection_time = 0
-        debounce_time = 1.0  # Minimum time between detections
+        last_press_time = 0
+        debounce_time = 0.5  # Half-second debounce
         
         # Store the last processed frame
         last_processed_frame = None
         
+        # Flag to prevent repeated detection and TTS for the same joystick press
+        detection_triggered = False
+        
         while True:
-            # Capture frame
-            frame = cam.capture_array("main")
-            frame_rgb = frame.copy()  # Preserve RGB version
+            # Capture current frame
+            current_frame = cam.capture_array("main")
+            current_frame_rgb = current_frame.copy()
             
-            # Convert to BGR for potential detection
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # Prepare display frame
+            if last_processed_frame is not None:
+                display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
+            else:
+                display_frame = current_frame_rgb.copy()
             
-            # Check for joystick press
-            for event in sense.stick.get_events():
-                if event.action == 'pressed' and not detector.is_active():
-                    current_time = time.time()
-                    if current_time - last_detection_time > debounce_time:
-                        last_detection_time = current_time
-                        detector.start_detection(frame_bgr)
+            # Add deadzone lines
+            cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
+            
+            # Check for joystick press with proper debounce
+            current_time = time.time()
+            events = sense.stick.get_events()
+            
+            if events and (current_time - last_press_time) > debounce_time:
+                for event in events:
+                    if event.action == 'pressed' and not detector.is_active():
+                        last_press_time = current_time
+                        
+                        # Capture a NEW frame specifically for this detection
+                        detection_frame = cam.capture_array("main")
+                        detection_frame_bgr = cv2.cvtColor(detection_frame, cv2.COLOR_RGB2BGR)
+                        
+                        # Start detection on this new frame
+                        detector.start_detection(detection_frame_bgr)
+                        
+                        # Reset detection trigger flag
+                        detection_triggered = False
+                        
+                        # Visual feedback
                         sense.clear(0, 255, 0)  # Green light when detecting
                         time.sleep(0.1)
                         sense.clear(0, 0, 0)
+                        break
             
             # Check if detection is complete
             if not detector.is_active():
@@ -309,22 +363,10 @@ def object_detection(cam):
                 if processed_frame is not None:
                     last_processed_frame = processed_frame
                     
-            if objects:
-                process_tts(objects)
-            
-            # Prepare display frame
-            if last_processed_frame is not None:
-                display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
-            else:
-                display_frame = frame_rgb.copy()
-            
-            # Add deadzone lines
-            cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
-            
-            # Show detection status
-            status = "DETECTING" if detector.is_active() else "READY"
-            cv2.putText(display_frame, f"Status: {status}", (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    # Perform detection and TTS only once per joystick press
+                    if objects and not detection_triggered:
+                        process_tts(objects)
+                        detection_triggered = True
             
             # Show frame
             cv2.imshow('Object Detection', display_frame)
