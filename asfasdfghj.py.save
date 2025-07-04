@@ -128,28 +128,16 @@ def show_message(input, background=[0, 0, 0]):
 #     pitch, roll, yaw = sense.get_orientation().values()
 #     print("pitch=%s, roll=%s, yaw=%s" % (pitch, roll, yaw))
 
-# while True:
-#     x, y, z = sense.get_accelerometer_raw().values()
-#     x = round(x, 0)
-#     y = round(y, 0)
-#     z = round(z, 0)
+#while True:
+#    x, y, z = sense.get_accelerometer_raw().values()
+#    x = round(x, 0)
+#    y = round(y, 0)
+#    z = round(z, 0)
+#
+#    print("x = %s, y = %s, z = %s" % (x, y, z))
+#    time.sleep(0.4)
 
-#     print("x = %s, y = %s, z = %s" % (x, y, z))
-#     time.sleep(0.4)
-
-sense.show_letter("V")
+sense.show_letter("J")
 
 while True:
-    x, y, z = sense.get_accelerometer_raw().values()
-
-    x = round(x, 0)
-    y = round(y, 0)
-
-    if x == -1:
-        sense.set_rotation(90)
-    elif x == 1:
-        sense.set_rotation(270)
-    elif y == -1:
-        sense.set_rotation(180)
-    elif y == 1:
-        sense.set_rotation(0)
+    
