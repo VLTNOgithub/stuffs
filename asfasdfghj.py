@@ -1,10 +1,11 @@
 from sense_hat import SenseHat
+import time
 
 sense = SenseHat()
 
-def show_message(input):
-    print(input)
-    sense.show_message(input, 0.05)
+def show_message(input, background=[0, 0, 0]):
+    print(f"Showing: '{input}'.")
+    sense.show_message(input, 0.05, back_colour=background)
 
 
 
@@ -87,3 +88,37 @@ def show_message(input):
 #         time.sleep(0.1)
 
 # check_press_and_update()
+
+# sense.show_letter("V")
+
+# angles = [0, 90, 180, 270, 0, 90, 180, 270]
+
+# def wrap(degrees):
+#     if degrees >= 360:
+#         return degrees - 360
+#     elif degrees < 0:
+#         return degrees + 360
+#     else:
+#         return degrees
+
+# while True:
+#     rotation = sense.get_orientation_degrees()["pitch"]
+#     if ((rotation >= 335 and rotation < 0) or (rotation <= 30 and rotation > 0)):
+#         sense.set_rotation(0)
+#     elif (rotation >= 60 and rotation <= 70):
+#         sense.set_rotation(90)
+#     print(rotation)
+
+while True:
+    temperature = round(sense.get_temperature(), 1)
+    pressure = round(sense.get_pressure(), 1)
+    humidity = round(sense.get_humidity(), 1)
+
+    if temperature > 18.3 and temperature < 26.7:
+        background = [0, 100, 0]
+    else:
+        background = [100, 0, 0]
+    
+    message = "Temp %s, Pres = %s, Hum = %s" % (temperature, pressure, humidity)
+
+    show_message(message, background=background)

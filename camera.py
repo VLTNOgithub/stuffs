@@ -223,6 +223,53 @@ class AsyncDetector:
         with self.lock:
             return self.active
 
+def process_tts(objects):
+    # Group by name
+    from collections import defaultdict
+    grouped_objects = defaultdict(list)
+    for obj in objects:
+        grouped_objects[obj["name"]].append(obj["state"]) # {"person": ["LEFT"]}
+    
+    # Priority: CLOSE > MIDDLE > LEFT/RIGHT
+    close_obj = None
+    for obj_name, states in grouped_objects.items():
+        if "CLOSE" in states:
+            close_obj = obj_name
+            break
+
+    if close_obj:
+        yapper.yap(f"There is a {close_obj} in front of you.")
+        return
+    
+    # Count all objects by state
+    state_counts = defaultdict(lambda: defaultdict(int))
+    for obj_name, states in grouped_objects.items():
+        for state in states:
+            state_counts[state][obj_name] += 1 # {'RIGHT': {'person': 2, 'clock': 1, 'tvmonitor': 1}), 'LEFT': {'person': 1})}
+    
+    # Build phrases for LEFT and RIGHT
+    phrases = []
+    for state in ["LEFT", "RIGHT"]: # ["LEFT", "RIGHT"] => "LEFT" then "RIGHT"
+        # Gets all objects bases on state (left or right)
+        objs = state_counts[state] # {'person': 2, 'clock': 1, 'tvmonitor': 1}
+        if objs:
+            obj_phrases = []
+            for obj_name, count in objs.items():
+                obj_name = "people" if count > 1 and obj_name == "person" else "person"
+                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # '2 people', '1 car'
+            direction = "to your left" if state == "LEFT" else "to your right"
+            phrases.append(f"{' and '.join(obj_phrases)} {direction}") # ' and '.join(obj_phrases) => '2 people and 1 car' => '2 people and 1 car to your left'
+    if phrases:
+        yapper.yap("There " + ("is" if len(phrases) == 1 else "are") + " " + " and ".join(phrases) + ".")
+    else:
+        # If only MIDDLE objects, list them
+        middle_objs = state_counts["MIDDLE"]
+        if middle_objs:
+            obj_phrases = []
+            for obj_name, count in middle_objs.items():
+                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
+            yapper.yap("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
+
 # ===== MAIN LOOP WITH ASYNC DETECTION =====
 def object_detection(cam):
     try:
@@ -263,48 +310,7 @@ def object_detection(cam):
                     last_processed_frame = processed_frame
                     
             if objects:
-                # Group by name
-                from collections import defaultdict, Counter
-                grouped_objects = defaultdict(list)
-                for obj in objects:
-                    grouped_objects[obj["name"]].append(obj["state"])
-
-                # Priority: CLOSE > MIDDLE > LEFT/RIGHT
-                close_obj = None
-                for obj_name, states in grouped_objects.items():
-                    if "CLOSE" in states:
-                        close_obj = obj_name
-                        break
-
-                if close_obj:
-                    yapper.yap(f"There is a {close_obj} in front of you.")
-                else:
-                    # Count all objects by state
-                    state_counts = defaultdict(lambda: defaultdict(int))
-                    for obj_name, states in grouped_objects.items():
-                        for state in states:
-                            state_counts[state][obj_name] += 1
-
-                    # Build phrases for LEFT and RIGHT
-                    phrases = []
-                    for state in ["LEFT", "RIGHT"]:
-                        objs = state_counts[state]
-                        if objs:
-                            obj_phrases = []
-                            for obj_name, count in objs.items():
-                                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
-                            direction = "to your left" if state == "LEFT" else "to your right"
-                            phrases.append(f"{' and '.join(obj_phrases)} {direction}")
-                    if phrases:
-                        yapper.yap("There " + ("is" if len(phrases) == 1 else "are") + " " + " and ".join(phrases) + ".")
-                    else:
-                        # If only MIDDLE objects, list them
-                        middle_objs = state_counts["MIDDLE"]
-                        if middle_objs:
-                            obj_phrases = []
-                            for obj_name, count in middle_objs.items():
-                                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
-                            yapper.yap("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
+                process_tts(objects)
             
             # Prepare display frame
             if last_processed_frame is not None:
