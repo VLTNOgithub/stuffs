@@ -38,8 +38,7 @@ MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 320  # Reduced network input size
 
 # ===== INITIALIZATION =====
-def download_file(url):
-    path = url.split("/")[-1]
+def download_file(url, path):
     if not os.path.exists(path):
         print(f"Downloading {path}...")
         try:
