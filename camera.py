@@ -1,14 +1,19 @@
+PREVIEW = True # Enable / disable the camera preview
+
 import os
-os.environ["QT_QPA_PLATFORM"] = "eglfs"
-os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = "/usr/lib/aarch64-linux-gnu/qt5/plugins"
-os.environ["DISPLAY"] = ":0"
-os.environ["XDG_RUNTIME_DIR"] = "/run/user/1000"
+
+if PREVIEW:
+    os.environ["QT_QPA_PLATFORM"] = "eglfs"
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = "/usr/lib/aarch64-linux-gnu/qt5/plugins"
+    os.environ["DISPLAY"] = ":0"
+    os.environ["XDG_RUNTIME_DIR"] = "/run/user/1000"
 
 import cv2
 import time
 import numpy as np
 import requests
 import threading
+
 from picamera2 import Picamera2
 from sense_hat import SenseHat
 import yapper as ypr
@@ -18,21 +23,23 @@ MODEL_URL = "https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_
 CONFIG_URL = "https://raw.githubusercontent.com/AlexeyAB/darknet/master/cfg/yolov4-tiny.cfg"
 CLASSES_URL = "https://raw.githubusercontent.com/AlexeyAB/darknet/master/data/coco.names"
 
-MODEL_PATH = "yolov4-tiny.weights"
-CONFIG_PATH = "yolov4-tiny.cfg"
-CLASSES_PATH = "coco.names"
+MODEL_PATH = MODEL_URL.split("/")[-1]
+CONFIG_PATH = CONFIG_URL.split("/")[-1]
+CLASSES_PATH = CLASSES_URL.split("/")[-1]
 
 # Detection parameters
 DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
 RESOLUTION = (480, 360)
-DEADZONE = 8
+MIDDLE_DEADZONE = 25
+CLOSE_THRESHOLD = 50000
 MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 320  # Reduced network input size
 
 # ===== INITIALIZATION =====
-def download_file(url, path):
+def download_file(url):
+    path = url.split("/")[-1]
     if not os.path.exists(path):
         print(f"Downloading {path}...")
         try:
@@ -83,10 +90,10 @@ sense.clear()
 
 # Precompute deadzone lines
 deadzone_lines = np.zeros((RESOLUTION[1], RESOLUTION[0], 3), dtype=np.uint8)
-cv2.line(deadzone_lines, (MIDDLE_X - DEADZONE, 0), 
-        (MIDDLE_X - DEADZONE, RESOLUTION[1]), (255, 0, 0), 1)
-cv2.line(deadzone_lines, (MIDDLE_X + DEADZONE, 0), 
-        (MIDDLE_X + DEADZONE, RESOLUTION[1]), (255, 0, 0), 1)
+cv2.line(deadzone_lines, (MIDDLE_X - MIDDLE_DEADZONE, 0), 
+        (MIDDLE_X - MIDDLE_DEADZONE, RESOLUTION[1]), (255, 0, 0), 1)
+cv2.line(deadzone_lines, (MIDDLE_X + MIDDLE_DEADZONE, 0), 
+        (MIDDLE_X + MIDDLE_DEADZONE, RESOLUTION[1]), (255, 0, 0), 1)
 
 # ===== CAMERA SETUP =====
 def setup_cam():
@@ -135,59 +142,60 @@ def detect_objects(frame_bgr):
                 x = int(centerX - (width / 2))
                 y = int(centerY - (height / 2))
                 
+                boxes.append([x, y, int(width), int(height)])
+                
                 # Store center point
                 center = (int(centerX), int(centerY))
                 centers.append(center)
-                
-                boxes.append([x, y, int(width), int(height)])
                 confidences.append(float(confidence))
                 class_ids.append(class_id)
                 class_names.append(classes[class_id])
     
-    # Apply non-max suppression
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
-    
-    # Process detected objects
+    # Process detected objects only if there are valid boxes
     detected_objects = []
-    if len(indices) > 0:
-        for i in indices.flatten():
-            x, y, w, h = boxes[i]
-            center_x, center_y = centers[i]
-            class_name = classes[class_ids[i]]
+    if len(boxes) > 0 and len(confidences) > 0:
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
+        if len(indices) > 0:
+            for i in indices.flatten():
+                x, y, w, h = boxes[i]
+                center_x, center_y = centers[i]
+                class_name = classes[class_ids[i]]
 
-            size = w * h
-            state = ""
+                size = w * h
+                state = ""
 
-            # Determine object state
-            if size >= 60000:
-                state = "CLOSE"
-            elif center_x >= (MIDDLE_X - DEADZONE) and center_x <= (MIDDLE_X + DEADZONE):
-                state = "MIDDLE"
-            elif center_x < (MIDDLE_X - DEADZONE):
-                state = "LEFT"
-            elif center_x > (MIDDLE_X + DEADZONE):
-                state = "RIGHT"
-            
-            # Draw bounding box if enabled
-            if DRAW_BOXES:
-                color = (0, 255, 0)  # Green boxes
-                cv2.rectangle(frame_bgr, (x, y), (x + w, y + h), color, 2)
-                label = f"{class_name}: {confidences[i]:.2f} | {state}"
-                cv2.putText(frame_bgr, label, (x, y-5), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-            
-            # Draw circle at center
-            cv2.circle(frame_bgr, (center_x, center_y), 2, (0, 0, 255), -1)
+                # Determine object state
+                if size >= CLOSE_THRESHOLD:
+                    state = "CLOSE"
+                elif center_x >= (MIDDLE_X - MIDDLE_DEADZONE) and center_x <= (MIDDLE_X + MIDDLE_DEADZONE):
+                    state = "MIDDLE"
+                elif center_x < (MIDDLE_X - MIDDLE_DEADZONE):
+                    state = "LEFT"
+                elif center_x > (MIDDLE_X + MIDDLE_DEADZONE):
+                    state = "RIGHT"
 
-            detected_objects.append({"name": class_name, "state": state})
+                detected_objects.append({"name": class_name, "state": state})
+
+                if PREVIEW:
+                    # Draw bounding box if enabled
+                    if DRAW_BOXES:
+                        color = (0, 255, 0)  # Green boxes
+                        cv2.rectangle(frame_bgr, (x, y), (x + w, y + h), color, 2)
+                        label = f"{class_name}: {confidences[i]:.2f} | {state}"
+                        cv2.putText(frame_bgr, label, (x, y-5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                    
+                    # Draw circle at center
+                    cv2.circle(frame_bgr, (center_x, center_y), 2, color, -1)
     
-    return frame_bgr, detected_objects
+    if PREVIEW: return frame_bgr, detected_objects
+    return detected_objects
 
 # ===== ASYNC DETECTION CLASS =====
 class AsyncDetector:
     def __init__(self):
         self.active = False
-        self.result_frame = None
+        if PREVIEW: self.result_frame = None
         self.result_objects = {}
         self.thread = None
         self.lock = threading.Lock()
@@ -204,17 +212,21 @@ class AsyncDetector:
             return True
             
     def _detect_thread(self, frame_bgr):
-        processed_frame, objects = detect_objects(frame_bgr)
+        if PREVIEW:
+            processed_frame, objects = detect_objects(frame_bgr)
+        else:
+            objects = detect_objects(frame_bgr)
+        
         with self.lock:
-            self.result_frame = processed_frame
+            if PREVIEW: self.result_frame = processed_frame
             self.result_objects = objects
             self.active = False
             
     def get_results(self):
         with self.lock:
-            if self.result_frame is None:
-                return None, []
-            return self.result_frame, self.result_objects
+            if PREVIEW: return self.result_frame, self.result_objects
+            return self.result_objects
+            
             
     def is_active(self):
         with self.lock:
@@ -269,7 +281,7 @@ def process_tts(objects):
     
     # Build phrases for LEFT and RIGHT
     phrases = []
-    for state in ["LEFT", "RIGHT", "MIDDLE"]: # ["LEFT", "RIGHT", "MIDDLE"] => "LEFT" then "RIGHT" then "MIDDLE"
+    for state in ["MIDDLE", "LEFT", "RIGHT"]: # ["MIDDLE", "LEFT", "RIGHT"] => "MIDDLE" then "LEFT" then "RIGHT"
         # Gets all objects bases on state (left or right)
         objs = state_counts[state] # {'person': 2, 'clock': 1, 'tvmonitor': 1}
         if objs:
@@ -277,16 +289,13 @@ def process_tts(objects):
             for obj_name, count in objs.items():
                 if obj_name == "person":
                     obj_name = "people" if count > 1 else "person"
-                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # '2 people', '1 car'
+                elif obj_name == "tvmonitor":
+                    obj_name = "screen"
+                obj_phrases.append(f"{count if count > 1 else 'a'} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # '2 people', '1 car'
             if state == "LEFT":
                 direction = "to your left"
             elif state == "RIGHT":
                 direction = "to your right"
-
-
-
-
-
             else: # Not left or right so has to be middle
                 direction = "in front of you"
             phrases.append(f"{' and '.join(obj_phrases)} {direction}") # ' and '.join(obj_phrases) => '2 people and 1 car' => '2 people and 1 car to your left'
@@ -304,33 +313,36 @@ def process_tts(objects):
 # ===== MAIN LOOP WITH ASYNC DETECTION =====
 def object_detection(cam):
     try:
-        cv2.namedWindow('Object Detection', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Object Detection', *RESOLUTION)
+        if PREVIEW:
+            cv2.namedWindow('Object Detection', cv2.WINDOW_NORMAL)
+            cv2.resizeWindow('Object Detection', *RESOLUTION)
 
         # Initialize async detector
         detector = AsyncDetector()
         last_press_time = 0
         debounce_time = 0.5  # Half-second debounce
         
-        # Store the last processed frame
-        last_processed_frame = None
+        if PREVIEW:
+            # Store the last processed frame
+            last_processed_frame = None
         
         # Flag to prevent repeated detection and TTS for the same joystick press
         detection_triggered = False
         
         while True:
-            # Capture current frame
-            current_frame = cam.capture_array("main")
-            current_frame_rgb = current_frame.copy()
+            if PREVIEW:
+                # Capture current frame
+                current_frame = cam.capture_array("main")
+                current_frame_rgb = current_frame.copy()
+                
+                # Prepare display frame
+                if last_processed_frame is not None:
+                    display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
+                else:
+                    display_frame = current_frame_rgb.copy()
             
-            # Prepare display frame
-            if last_processed_frame is not None:
-                display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
-            else:
-                display_frame = current_frame_rgb.copy()
-            
-            # Add deadzone lines
-            cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
+                # Add deadzone lines
+                cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
             
             # Check for joystick press with proper debounce
             current_time = time.time()
@@ -359,29 +371,32 @@ def object_detection(cam):
             
             # Check if detection is complete
             if not detector.is_active():
-                processed_frame, objects = detector.get_results()
-                if processed_frame is not None:
+                if PREVIEW:
+                    processed_frame, objects = detector.get_results()
                     last_processed_frame = processed_frame
-                    
-                    # Perform detection and TTS only once per joystick press
-                    if objects and not detection_triggered:
-                        process_tts(objects)
-                        detection_triggered = True
-            
-            # Show frame
-            cv2.imshow('Object Detection', display_frame)
-            
-            # Exit on 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                else: 
+                    objects = detector.get_results()
+
+                # Perform detection and TTS only once per joystick press
+                if objects and not detection_triggered:
+                    process_tts(objects)
+                    detection_triggered = True
+
+            if PREVIEW:
+                # Show frame
+                cv2.imshow('Object Detection', display_frame)
+                
+                # Exit on 'q'
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
     finally:
         cam.stop()
-        cv2.destroyAllWindows()
+        if PREVIEW: cv2.destroyAllWindows()
         sense.clear()
 
 if __name__ == "__main__":
     print("Starting object detection...")
     print("Press Sense HAT joystick to detect objects")
-    print("Press 'q' to exit")
+    if PREVIEW: print("Press 'q' to exit")
     camera = setup_cam()
     object_detection(camera)

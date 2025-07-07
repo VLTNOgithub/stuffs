@@ -1,6 +1,10 @@
+import libcamera._libcamera
 from sense_hat import SenseHat
 import time
 import math
+import cv2
+from picamera2 import Picamera2
+from libcamera import Transform
 
 sense = SenseHat()
 
@@ -107,7 +111,7 @@ def show_message(input, background=[0, 0, 0]):
 #     if ((rotation >= 335 and rotation < 0) or (rotation <= 30 and rotation > 0)):
 #         sense.set_rotation(0)
 #     elif (rotation >= 60 and rotation <= 70):
-#         sense.set_rotation(90)
+#         sense.set_rotation(90)port libcamera
 #     print(rotation)
 
 # while True:
@@ -137,19 +141,39 @@ def show_message(input, background=[0, 0, 0]):
 #     print("x = %s, y = %s, z = %s" % (x, y, z))
 #     time.sleep(0.4)
 
-sense.show_letter("V")
+# sense.show_letter("V")
 
-while True:
-    x, y, z = sense.get_accelerometer_raw().values()
+# while True:
+#     x, y, z = sense.get_accelerometer_raw().values()
 
-    x = round(x, 0)
-    y = round(y, 0)
+#     x = round(x, 0)
+#     y = round(y, 0)
 
-    if x == -1:
-        sense.set_rotation(90)
-    elif x == 1:
-        sense.set_rotation(270)
-    elif y == -1:
-        sense.set_rotation(180)
-    elif y == 1:
-        sense.set_rotation(0)
+#     if x == -1:
+#         sense.set_rotation(90)
+#     elif x == 1:
+#         sense.set_rotation(270)
+#     elif y == -1:
+#         sense.set_rotation(180)
+#     elif y == 1:
+#         sense.set_rotation(0)
+
+# picam = Picamera2()
+
+# picam.preview_configuration.size = (1920, 1080)
+# picam.configure()
+
+# picam.start(show_preview=True)
+# time.sleep(100)
+# picam.stop()
+
+picam = Picamera2()
+
+preview_config = picam.create_preview_configuration(
+    transform=Transform(vflip=True)
+)
+
+picam.configure(preview_config)
+picam.start(show_preview=True)
+time.sleep(100)
+picam.stop()

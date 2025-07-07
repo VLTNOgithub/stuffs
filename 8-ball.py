@@ -1,6 +1,5 @@
 import random
 import time
-import math
 from sense_hat import SenseHat
 
 sense = SenseHat()
@@ -9,8 +8,8 @@ sense.show_message("Ask a question", 0.045)
 
 time.sleep(1.5)
 
-replies = ["Yes", "No", "Maybe", "Of course!", "That would be dumb", "Fate has decided", "Another time", "WTF bro??", "WTF bro??"]
-
+replies = ["Yes", "No", "Maybe", "Of course!", "That would be dumb", "Fate has decided", "Another time", "WTF bro??"] 
+ 
 while True:
     x, y, z = sense.get_accelerometer_raw().values()
     x = abs(x)
