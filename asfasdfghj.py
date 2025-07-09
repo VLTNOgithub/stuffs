@@ -13,8 +13,6 @@ def show_message(input, background=[0, 0, 0]):
     sense.show_message(input, 0.05, back_colour=background)
 
 
-
-
 # # message
 # message = "... --- ... ..- / ..-- .- --."
 
