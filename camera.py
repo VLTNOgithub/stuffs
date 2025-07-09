@@ -18,14 +18,11 @@ from picamera2 import Picamera2
 from sense_hat import SenseHat
 import yapper as ypr
 
-# ===== CONFIGURATION =====
-MODEL_URL = "https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v4_pre/yolov4-tiny.weights"
-CONFIG_URL = "https://raw.githubusercontent.com/AlexeyAB/darknet/master/cfg/yolov4-tiny.cfg"
-CLASSES_URL = "https://raw.githubusercontent.com/AlexeyAB/darknet/master/data/coco.names"
+from yolov5 import detect  # Import YOLOv5 detection module
+import torch
 
-MODEL_PATH = MODEL_URL.split("/")[-1]
-CONFIG_PATH = CONFIG_URL.split("/")[-1]
-CLASSES_PATH = CLASSES_URL.split("/")[-1]
+# ===== CONFIGURATION =====
+MODEL_PATH = "yolov5s.pt"  # Use YOLOv5 small model (pretrained)
 
 # Detection parameters
 DRAW_BOXES = True
@@ -38,50 +35,13 @@ MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 320  # Reduced network input size
 
 # ===== INITIALIZATION =====
-def download_file(url, path):
-    if not os.path.exists(path):
-        print(f"Downloading {path}...")
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            with open(path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk: f.write(chunk)
-            print(f"Downloaded {path} successfully")
-            return True
-        except Exception as e:
-            print(f"Download failed: {e}")
-            return False
-    return True
-
-# Download model files
-config_ok = download_file(CONFIG_URL, CONFIG_PATH)
-model_ok = download_file(MODEL_URL, MODEL_PATH)
-classes_ok = download_file(CLASSES_URL, CLASSES_PATH)
-
 # Initialize model
-net = None
-classes = []
-output_layers = []
-if config_ok and model_ok and classes_ok:
-    try:
-        with open(CLASSES_PATH, 'r') as f:
-            classes = [line.strip() for line in f.readlines()]
-        
-        net = cv2.dnn.readNetFromDarknet(CONFIG_PATH, MODEL_PATH)
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-        
-        # Precompute output layers once
-        layer_names = net.getLayerNames()
-        output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-        
-        print(f"Model loaded - {len(classes)} detectable objects")
-    except Exception as e:
-        print(f"Model loading failed: {e}")
-        net = None
-else:
-    print("Skipping model initialization")
+try:
+    model = torch.hub.load('ultralytics/yolov5', 'custom', path=MODEL_PATH)
+    print(f"YOLOv5 model loaded successfully")
+except Exception as e:
+    print(f"Failed to load YOLOv5 model: {e}")
+    model = None
 
 # Initialise Sense HAT
 sense = SenseHat()
@@ -107,86 +67,51 @@ def setup_cam():
 
 # ===== OBJECT DETECTION =====
 def detect_objects(frame_bgr):
-    if net is None:
+    if model is None:
         return frame_bgr, []
-    
-    # Create blob and run detection
-    blob = cv2.dnn.blobFromImage(
-        frame_bgr, 1/255.0, (BLOB_SIZE, BLOB_SIZE), 
-        swapRB=True, crop=False
-    )
-    net.setInput(blob)
-    detections = net.forward(output_layers)
-    
-    # Process detections
-    boxes = []
-    confidences = []
-    class_ids = []
-    class_names = []
-    centers = []
-    h, w = frame_bgr.shape[:2]
-    
-    for output in detections:
-        for detection in output:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            
-            if confidence > CONFIDENCE_THRESHOLD:
-                # Scale bounding box to frame dimensions
-                box = detection[0:4] * np.array([w, h, w, h])
-                (centerX, centerY, width, height) = box.astype("int")
-                
-                # Calculate top-left corner
-                x = int(centerX - (width / 2))
-                y = int(centerY - (height / 2))
-                
-                boxes.append([x, y, int(width), int(height)])
-                
-                # Store center point
-                center = (int(centerX), int(centerY))
-                centers.append(center)
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
-                class_names.append(classes[class_id])
-    
-    # Process detected objects only if there are valid boxes
+
+    # Convert frame to RGB (YOLOv5 expects RGB input)
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+    # Perform detection using YOLOv5
+    results = model(frame_rgb)
+
+    # Extract detection results
     detected_objects = []
-    if len(boxes) > 0 and len(confidences) > 0:
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
-        if len(indices) > 0:
-            for i in indices.flatten():
-                x, y, w, h = boxes[i]
-                center_x, center_y = centers[i]
-                class_name = classes[class_ids[i]]
+    for *box, conf, cls in results.xyxy[0]:  # xyxy format: [x1, y1, x2, y2, confidence, class]
+        x1, y1, x2, y2 = map(int, box)
+        class_name = model.names[int(cls)]
+        confidence = float(conf)
 
-                size = w * h
-                state = ""
+        # Determine object state
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        size = (x2 - x1) * (y2 - y1)
+        state = ""
 
-                # Determine object state
-                if size >= CLOSE_THRESHOLD:
-                    state = "CLOSE"
-                elif center_x >= (MIDDLE_X - MIDDLE_DEADZONE) and center_x <= (MIDDLE_X + MIDDLE_DEADZONE):
-                    state = "MIDDLE"
-                elif center_x < (MIDDLE_X - MIDDLE_DEADZONE):
-                    state = "LEFT"
-                elif center_x > (MIDDLE_X + MIDDLE_DEADZONE):
-                    state = "RIGHT"
+        if size >= CLOSE_THRESHOLD:
+            state = "CLOSE"
+        elif center_x >= (MIDDLE_X - MIDDLE_DEADZONE) and center_x <= (MIDDLE_X + MIDDLE_DEADZONE):
+            state = "MIDDLE"
+        elif center_x < (MIDDLE_X - MIDDLE_DEADZONE):
+            state = "LEFT"
+        elif center_x > (MIDDLE_X + MIDDLE_DEADZONE):
+            state = "RIGHT"
 
-                detected_objects.append({"name": class_name, "state": state})
+        detected_objects.append({"name": class_name, "state": state})
 
-                if PREVIEW:
-                    # Draw bounding box if enabled
-                    if DRAW_BOXES:
-                        color = (0, 255, 0)  # Green boxes
-                        cv2.rectangle(frame_bgr, (x, y), (x + w, y + h), color, 2)
-                        label = f"{class_name}: {confidences[i]:.2f} | {state}"
-                        cv2.putText(frame_bgr, label, (x, y-5), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-                    
-                    # Draw circle at center
-                    cv2.circle(frame_bgr, (center_x, center_y), 2, color, -1)
-    
+        if PREVIEW:
+            # Draw bounding box if enabled
+            if DRAW_BOXES:
+                color = (0, 255, 0)  # Green boxes
+                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
+                label = f"{class_name}: {confidence:.2f} | {state}"
+                cv2.putText(frame_bgr, label, (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+            # Draw circle at center
+            cv2.circle(frame_bgr, (center_x, center_y), 2, color, -1)
+
     if PREVIEW: return frame_bgr, detected_objects
     return detected_objects
 
