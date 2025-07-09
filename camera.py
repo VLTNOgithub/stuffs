@@ -1,4 +1,4 @@
-PREVIEW = True # Enable / disable the camera preview
+PREVIEW = False # Enable / disable the camera preview
 
 import os
 
@@ -16,25 +16,25 @@ import threading
 
 from picamera2 import Picamera2
 from sense_hat import SenseHat
-import yapper as ypr
+from gtts import gTTS
 
 from yolov5 import detect  # Import YOLOv5 detection module
 import torch
 
 # ===== CONFIGURATION =====
-MODEL_PATH = "yolov5s.pt"  # Use YOLOv5 small model (pretrained)
+MODEL_PATH = "yolov5s.pt"
 
 # Detection parameters
 DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
-RESOLUTION = (720, 480)
+RESOLUTION = (480, 360)
 MIDDLE_DEADZONE = 25
 CLOSE_THRESHOLD = 50000
 MIDDLE_X = RESOLUTION[0] // 2
-BLOB_SIZE = 512  # Reduced network input size
+BLOB_SIZE = 512
 
-# ===== INITIALIZATION =====
+# ===== INITIALISATION =====
 # Initialize model
 try:
     model = torch.hub.load('ultralytics/yolov5', 'custom', path=MODEL_PATH)
@@ -158,22 +158,22 @@ class AsyncDetector:
 
 class AsyncTTS:
     def __init__(self):
-        self.active = False
-        self.thread = None
         self.lock = threading.Lock()
-        self.yapper = ypr.Yapper(use_stdout=True)
         
     def start_tts(self, text):
-        with self.lock:
-            self.active = True
-            self.thread = threading.Thread(target=self._async_tts, args=(text,))
-            self.thread.daemon = True
-            self.thread.start()
-            return True
+        threading.Thread(target=self._async_tts, args=(text,), daemon=True).start()
     
     def _async_tts(self, text):
         with self.lock:
-            self.yapper.yap(text)
+            try:
+                # Generate speech using gTTS
+                tts = gTTS(text=text, lang="en")
+                tts.save("/tmp/tts_output.mp3")  # Save audio to a temporary file
+
+                # Play the audio file
+                os.system("mpg123 /tmp/tts_output.mp3")
+            except Exception as e:
+                print(f"TTS error: {e}")
 
 
 def process_tts(objects):
@@ -192,7 +192,7 @@ def process_tts(objects):
         for state in states:
             state_counts[state][obj_name] += 1 # {'RIGHT': {'person': 2, 'clock': 1, 'tvmonitor': 1}), 'LEFT': {'person': 1})}
     
-    # Build phrases for LEFT and RIGHT
+    # Build phrases
     phrases = []
     for state in ["MIDDLE", "LEFT", "RIGHT"]: # ["MIDDLE", "LEFT", "RIGHT"] => "MIDDLE" then "LEFT" then "RIGHT"
         # Gets all objects bases on state (left or right)
@@ -202,7 +202,7 @@ def process_tts(objects):
             for obj_name, count in objs.items():
                 if obj_name == "person":
                     obj_name = "people" if count > 1 else "person"
-                elif obj_name == "tvmonitor":
+                elif obj_name == "tv":
                     obj_name = "screen"
                 obj_phrases.append(f"{count if count > 1 else 'a'} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # '2 people', '1 car'
             if state == "LEFT":
@@ -223,7 +223,7 @@ def process_tts(objects):
                 obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
             async_tts.start_tts("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
 
-# ===== MAIN LOOP WITH ASYNC DETECTION =====
+# ===== MAIN LOOP =====
 def object_detection(cam):
     try:
         if PREVIEW:
@@ -237,6 +237,8 @@ def object_detection(cam):
         
         # Flag to prevent repeated detection and TTS for the same joystick press
         detection_triggered = False
+
+        display_frame = cam.capture_array("main")
         
         while True:
             current_time = time.time()
