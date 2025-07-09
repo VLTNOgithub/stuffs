@@ -28,11 +28,11 @@ MODEL_PATH = "yolov5s.pt"  # Use YOLOv5 small model (pretrained)
 DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
-RESOLUTION = (480, 360)
+RESOLUTION = (720, 480)
 MIDDLE_DEADZONE = 25
 CLOSE_THRESHOLD = 50000
 MIDDLE_X = RESOLUTION[0] // 2
-BLOB_SIZE = 320  # Reduced network input size
+BLOB_SIZE = 512  # Reduced network input size
 
 # ===== INITIALIZATION =====
 # Initialize model
@@ -90,7 +90,7 @@ def detect_objects(frame_bgr):
         state = ""
 
         if size >= CLOSE_THRESHOLD:
-            state = "CLOSE"
+            state = "MIDDLE"
         elif center_x >= (MIDDLE_X - MIDDLE_DEADZONE) and center_x <= (MIDDLE_X + MIDDLE_DEADZONE):
             state = "MIDDLE"
         elif center_x < (MIDDLE_X - MIDDLE_DEADZONE):
@@ -186,17 +186,6 @@ def process_tts(objects):
     for obj in objects:
         grouped_objects[obj["name"]].append(obj["state"]) # {"person": ["LEFT"]}
     
-    # Priority: CLOSE > MIDDLE > LEFT/RIGHT
-    close_obj = None
-    for obj_name, states in grouped_objects.items():
-        if "CLOSE" in states:
-            close_obj = obj_name
-            break
-
-    if close_obj:
-        async_tts.start_tts(f"There is a {close_obj} in front of you.")
-        return
-    
     # Count all objects by state
     state_counts = defaultdict(lambda: defaultdict(int))
     for obj_name, states in grouped_objects.items():
@@ -220,7 +209,7 @@ def process_tts(objects):
                 direction = "to your left"
             elif state == "RIGHT":
                 direction = "to your right"
-            else: # Not left or right so has to be middle
+            elif state == "MIDDLE":
                 direction = "in front of you"
             phrases.append(f"{' and '.join(obj_phrases)} {direction}") # ' and '.join(obj_phrases) => '2 people and 1 car' => '2 people and 1 car to your left'
     if phrases:
@@ -246,29 +235,10 @@ def object_detection(cam):
         last_press_time = 0
         debounce_time = 0.5  # Half-second debounce
         
-        if PREVIEW:
-            # Store the last processed frame
-            last_processed_frame = None
-        
         # Flag to prevent repeated detection and TTS for the same joystick press
         detection_triggered = False
         
         while True:
-            if PREVIEW:
-                # Capture current frame
-                current_frame = cam.capture_array("main")
-                current_frame_rgb = current_frame.copy()
-                
-                # Prepare display frame
-                if last_processed_frame is not None:
-                    display_frame = cv2.cvtColor(last_processed_frame, cv2.COLOR_BGR2RGB)
-                else:
-                    display_frame = current_frame_rgb.copy()
-            
-                # Add deadzone lines
-                cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
-            
-            # Check for joystick press with proper debounce
             current_time = time.time()
             events = sense.stick.get_events()
             
@@ -277,7 +247,7 @@ def object_detection(cam):
                     if event.action == 'pressed' and not detector.is_active():
                         last_press_time = current_time
                         
-                        # Capture a NEW frame specifically for this detection
+                        # Capture a new frame for this detection
                         detection_frame = cam.capture_array("main")
                         detection_frame_bgr = cv2.cvtColor(detection_frame, cv2.COLOR_RGB2BGR)
                         
@@ -287,8 +257,7 @@ def object_detection(cam):
                         # Reset detection trigger flag
                         detection_triggered = False
                         
-                        # Visual feedback
-                        sense.clear(0, 255, 0)  # Green light when detecting
+                        sense.clear(0, 255, 0)
                         time.sleep(0.1)
                         sense.clear(0, 0, 0)
                         break
@@ -297,12 +266,14 @@ def object_detection(cam):
             if not detector.is_active():
                 if PREVIEW:
                     processed_frame, objects = detector.get_results()
-                    last_processed_frame = processed_frame
                 else: 
                     objects = detector.get_results()
 
                 # Perform detection and TTS only once per joystick press
                 if objects and not detection_triggered:
+                    if PREVIEW:
+                        display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                        cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
                     process_tts(objects)
                     detection_triggered = True
 
