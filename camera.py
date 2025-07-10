@@ -11,14 +11,12 @@ if PREVIEW:
 import cv2
 import time
 import numpy as np
-import requests
 import threading
 
 from picamera2 import Picamera2
 from sense_hat import SenseHat
 from gtts import gTTS
 
-from yolov5 import detect  # Import YOLOv5 detection module
 import torch
 
 # ===== CONFIGURATION =====
@@ -28,8 +26,8 @@ MODEL_PATH = "yolov5s.pt"
 DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
-RESOLUTION = (480, 360)
-MIDDLE_DEADZONE = 25
+RESOLUTION = (720, 480)
+MIDDLE_DEADZONE = 40
 CLOSE_THRESHOLD = 50000
 MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 512
@@ -96,6 +94,9 @@ def detect_objects(frame_bgr):
             state = "LEFT"
         elif center_x > (MIDDLE_X + MIDDLE_DEADZONE):
             state = "RIGHT"
+        
+        if class_name == "tv":
+            class_name = "screen"
 
         detected_objects.append({"name": class_name, "state": state})
 
@@ -188,19 +189,17 @@ def process_tts(objects):
     state_counts = defaultdict(lambda: defaultdict(int))
     for obj_name, states in grouped_objects.items():
         for state in states:
-            state_counts[state][obj_name] += 1 # e.g. {"RIGHT": {"person": 2, "clock": 1, "tvmonitor": 1}), "LEFT": {"person": 1})}
+            state_counts[state][obj_name] += 1 # e.g. {"RIGHT": {"person": 2, "clock": 1, "screen": 1}), "LEFT": {"person": 1})}
     
     # Build phrases
     phrases = []
     for state in ["MIDDLE", "LEFT", "RIGHT"]: # ["MIDDLE", "LEFT", "RIGHT"] => "MIDDLE" then "LEFT" then "RIGHT"
-        objs = state_counts[state] # e.g. {"person": 2, "clock": 1, "tvmonitor": 1}
+        objs = state_counts[state] # e.g. {"person": 2, "clock": 1, "screen": 1}
         if objs:
             obj_phrases = []
             for obj_name, count in objs.items():
                 if obj_name == "person":
                     obj_name = "people" if count > 1 else "person"
-                elif obj_name == "tv":
-                    obj_name = "screen"
                 obj_phrases.append(f"{count if count > 1 else 'a'} {obj_name}{'s' if count > 1 and obj_name != 'people' else ''}") # "2 people", "1 car"
             if state == "LEFT":
                 direction = "to your left"
@@ -210,7 +209,7 @@ def process_tts(objects):
                 direction = "in front of you"
             phrases.append(f"{' and '.join(obj_phrases)} {direction}") # e.g. " and ".join(obj_phrases) => "2 people and 1 car to your left"
     if phrases:
-        async_tts.start_tts("There " + ("is" if len(phrases) == 1 or phrases[0].__contains__("person") else "are") + " " + " and ".join(phrases) + ".")
+        async_tts.start_tts("There " + ("is" if len(phrases) == 1 or phrases[0].__contains__("person") or phrases[0].startswith("a") else "are") + " " + " and ".join(phrases) + ".")
 
 # ===== MAIN LOOP =====
 def object_detection(cam):
@@ -228,6 +227,8 @@ def object_detection(cam):
         detection_triggered = False
 
         display_frame = cam.capture_array("main")
+        cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
+        cv2.imshow("Object Detection", display_frame)
         
         while True:
             current_time = time.time()
@@ -250,21 +251,6 @@ def object_detection(cam):
                         sense.clear(0, 255, 0)
                         time.sleep(0.1)
                         sense.clear(0, 0, 0)
-
-                        while not detector.is_active():
-                            if PREVIEW:
-                                frame, objects = detector.get_results()
-
-                                print(frame)
-
-                                if objects:
-                                    process_tts(objects)
-
-                                # Add deadzone lines
-                                cv2.addWeighted(detection_frame, 1.0, deadzone_lines, 1.0, 0, detection_frame)
-
-                                cv2.imshow("Object Detection", frame)
-                        
                         break
             
             # Check if detection is complete
@@ -279,6 +265,8 @@ def object_detection(cam):
                     if PREVIEW:
                         display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
                         cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
+                        cv2.imshow("Object Detection", display_frame)
+
                     process_tts(objects)
                     detection_triggered = True
 
