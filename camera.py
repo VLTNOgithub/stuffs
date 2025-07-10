@@ -33,7 +33,6 @@ MIDDLE_X = RESOLUTION[0] // 2
 BLOB_SIZE = 512
 
 # ===== INITIALISATION =====
-# Initialize model
 try:
     model = torch.hub.load("ultralytics/yolov5", "custom", path=MODEL_PATH)
     print(f"YOLOv5 model loaded successfully")
@@ -41,7 +40,6 @@ except Exception as e:
     print(f"Failed to load YOLOv5 model: {e}")
     model = None
 
-# Initialise Sense HAT
 sense = SenseHat()
 sense.clear()
 
@@ -80,7 +78,6 @@ def detect_objects(frame_bgr):
         class_name = model.names[int(cls)]
         confidence = float(conf)
 
-        # Determine object state
         center_x = (x1 + x2) // 2
         center_y = (y1 + y2) // 2
         size = (x2 - x1) * (y2 - y1)
