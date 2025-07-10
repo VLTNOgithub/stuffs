@@ -1,4 +1,4 @@
-PREVIEW = False # Enable / disable the camera preview
+PREVIEW = True # Enable / disable the camera preview
 
 import os
 
@@ -69,14 +69,13 @@ def setup_cam():
 def detect_objects(frame_bgr):
     if model is None:
         return frame_bgr, []
-
-    # Convert frame to RGB (YOLOv5 expects RGB input)
+    
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-    # Perform detection using YOLOv5
+    # Perform detection
     results = model(frame_rgb)
 
-    # Extract detection results
+    # Get detection results
     detected_objects = []
     for *box, conf, cls in results.xyxy[0]:  # xyxy format: [x1, y1, x2, y2, confidence, class]
         x1, y1, x2, y2 = map(int, box)
@@ -156,6 +155,7 @@ class AsyncDetector:
         with self.lock:
             return self.active
 
+# ===== ASYNC TTS CLASS =====
 class AsyncTTS:
     def __init__(self):
         self.lock = threading.Lock()
@@ -177,7 +177,6 @@ class AsyncTTS:
 
 
 def process_tts(objects):
-    # Initialise async tts
     async_tts = AsyncTTS()
 
     # Group by name
@@ -214,14 +213,6 @@ def process_tts(objects):
             phrases.append(f"{' and '.join(obj_phrases)} {direction}") # ' and '.join(obj_phrases) => '2 people and 1 car' => '2 people and 1 car to your left'
     if phrases:
         async_tts.start_tts("There " + ("is" if len(phrases) == 1 or phrases[0].__contains__("person") else "are") + " " + " and ".join(phrases) + ".")
-    else:
-        # If only MIDDLE objects, list them
-        middle_objs = state_counts["MIDDLE"]
-        if middle_objs:
-            obj_phrases = []
-            for obj_name, count in middle_objs.items():
-                obj_phrases.append(f"{count} {obj_name}{'s' if count > 1 else ''}")
-            async_tts.start_tts("There " + ("is" if sum(middle_objs.values()) == 1 else "are") + " " + " and ".join(obj_phrases) + " in front of you.")
 
 # ===== MAIN LOOP =====
 def object_detection(cam):
