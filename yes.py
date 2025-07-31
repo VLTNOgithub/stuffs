@@ -1,5 +1,5 @@
 from sense_hat import SenseHat
-from utils import parse_matrix
+from utils_stuff import parse_matrix
 sense = SenseHat()
 
 yellow = [255,255,0]

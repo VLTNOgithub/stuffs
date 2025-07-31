@@ -3,8 +3,6 @@ PREVIEW = True # Enable / disable the camera preview
 import os
 
 if PREVIEW:
-    os.environ["QT_QPA_PLATFORM"] = "eglfs"
-    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = "/usr/lib/aarch64-linux-gnu/qt5/plugins"
     os.environ["DISPLAY"] = ":0"
     os.environ["XDG_RUNTIME_DIR"] = "/run/user/1000"
 
@@ -14,7 +12,6 @@ import numpy as np
 import threading
 
 from picamera2 import Picamera2
-from sense_hat import SenseHat
 from gtts import gTTS
 
 import torch
@@ -26,7 +23,7 @@ MODEL_PATH = "yolov5s.pt"
 DRAW_BOXES = True
 CONFIDENCE_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.3
-RESOLUTION = (720, 480)
+RESOLUTION = (1920, 1080)
 MIDDLE_DEADZONE = 40
 CLOSE_THRESHOLD = 50000
 MIDDLE_X = RESOLUTION[0] // 2
@@ -39,9 +36,6 @@ try:
 except Exception as e:
     print(f"Failed to load YOLOv5 model: {e}")
     model = None
-
-sense = SenseHat()
-sense.clear()
 
 # Precompute deadzone lines
 deadzone_lines = np.zeros((RESOLUTION[1], RESOLUTION[0], 3), dtype=np.uint8)
@@ -168,7 +162,7 @@ class AsyncTTS:
                 tts.save("/tmp/tts_output.mp3")  # Save audio to a temporary file
 
                 # Play the audio file
-                os.system("mpg123 /tmp/tts_output.mp3")
+                os.system("mpg123 -q /tmp/tts_output.mp3")
             except Exception as e:
                 print(f"TTS error: {e}")
 
@@ -225,30 +219,27 @@ def object_detection(cam):
 
         display_frame = cam.capture_array("main")
         cv2.addWeighted(display_frame, 1.0, deadzone_lines, 1.0, 0, display_frame)
-        cv2.imshow("Object Detection", display_frame)
+
+        if PREVIEW:
+            cv2.imshow("Object Detection", display_frame)
         
         while True:
-            current_time = time.time()
-            events = sense.stick.get_events()
+            if PREVIEW:
+                key = cv2.waitKey(1) & 0xFF
             
-            if events and (current_time - last_press_time) > debounce_time:
-                for event in events:
-                    if event.action == "pressed" and not detector.is_active():
-                        last_press_time = current_time
-                        
-                        # Capture a new frame for this detection
-                        detection_frame = cam.capture_array("main")
-                        detection_frame_bgr = cv2.cvtColor(detection_frame, cv2.COLOR_RGB2BGR)
+            current_time = time.time()
+            if key == ord("t") and (current_time - last_press_time) > debounce_time and not detector.is_active():
+                last_press_time = current_time
+                    
+                # Capture a new frame for this detection
+                detection_frame = cam.capture_array("main")
+                detection_frame_bgr = cv2.cvtColor(detection_frame, cv2.COLOR_RGB2BGR)
 
-                        detector.start_detection(detection_frame_bgr)
-                        
-                        # Reset detection trigger flag
-                        detection_triggered = False
-                        
-                        sense.clear(0, 255, 0)
-                        time.sleep(0.1)
-                        sense.clear(0, 0, 0)
-                        break
+                print("Key 't' pressed. Starting detection...")
+                detector.start_detection(detection_frame_bgr)
+                
+                # Reset detection trigger flag
+                detection_triggered = False
             
             # Check if detection is complete
             if not detector.is_active():
@@ -269,16 +260,14 @@ def object_detection(cam):
 
             if PREVIEW:
                 # Exit on q
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                if key == ord("q"):
                     break
     finally:
         cam.stop()
         if PREVIEW: cv2.destroyAllWindows()
-        sense.clear()
 
 if __name__ == "__main__":
     print("Starting object detection...")
-    print("Press Sense HAT joystick to detect objects")
     if PREVIEW: print("Press 'q' to exit")
     camera = setup_cam()
     object_detection(camera)
